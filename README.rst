@@ -19,3 +19,11 @@ Install into the same virtualenv as pyls itself.
 
 ``pip install pyls-mypy``
 
+Options
+-------
+
+This plugin supports the following options:
+
+- **live_mode**: When disabled, reads the saved file during linting, otherwise sends the live file using mypy's '--command' argument. Default: true
+- **config_files**: A list of configuration files; passes first found configuration file to mypy. If the file path is relative, the file will be searched for up to the root of the project directory. File paths support user directory and environment variable expansion. Default: []
+
