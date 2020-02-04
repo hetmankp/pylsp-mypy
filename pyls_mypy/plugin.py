@@ -2,10 +2,13 @@ import re
 import os
 import os.path
 import itertools
+import logging
 from mypy import api as mypy_api
 from pyls import hookimpl
 
 line_pattern = r"([^:]+):(?:(\d+):)?(?:(\d+):)? (\w+): (.*)"
+
+log = logging.getLogger(__name__)
 
 
 def parse_line(line, document=None):
@@ -15,18 +18,28 @@ def parse_line(line, document=None):
     '''
     result = re.match(line_pattern, line)
     if result:
-        _, lineno, offset, severity, msg = result.groups()
-        lineno = int(lineno or 1)
-        offset = int(offset or 0)
+        file_path, lineno, offset, severity, msg = result.groups()
+
+        if file_path != "<string>":  # live mode
+            # results from other files can be included, but we cannot return
+            # them.
+            if document and document.path and not document.path.endswith(
+                    file_path):
+                log.warning("discarding result for %s against %s", file_path,
+                            document.path)
+                return None
+
+        lineno = int(lineno or 1) - 1  # 0-based line number
+        offset = int(offset or 1) - 1  # 0-based offset
         errno = 2
         if severity == 'error':
             errno = 1
         diag = {
             'source': 'mypy',
             'range': {
-                'start': {'line': lineno - 1, 'character': offset},
+                'start': {'line': lineno, 'character': offset},
                 # There may be a better solution, but mypy does not provide end
-                'end': {'line': lineno - 1, 'character': offset + 1}
+                'end': {'line': lineno, 'character': offset + 1}
             },
             'message': msg,
             'severity': errno
@@ -43,7 +56,7 @@ def parse_line(line, document=None):
 
 
 @hookimpl
-def pyls_lint(config, document):
+def pyls_lint(config, workspace, document, is_saved):
     args = ['--incremental',
             '--show-column-numbers',
             '--follow-imports', 'silent']
@@ -78,11 +91,17 @@ def pyls_lint(config, document):
             args += ['--config-file', config_file]
             break
 
-    live_mode = config.plugin_settings('pyls_mypy').get('live_mode', True)
+    settings = config.plugin_settings('pyls_mypy')
+    live_mode = settings.get('live_mode', True)
     if live_mode:
         args += ['--command', document.source]
-    else:
+    elif is_saved:
         args += [document.path]
+    else:
+        return []
+
+    if settings.get('strict', False):
+        args.append('--strict')
 
     report, errors, _ = mypy_api.run(args)
 
